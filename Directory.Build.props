@@ -13,6 +13,16 @@
   -->
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Lifeline' or '$(MSBuildProjectName)' == 'LifelineHelper'">
     <Version>1.0.0</Version>
+
+    <!--
+      Stops the .NET SDK from automatically appending the git commit hash
+      (e.g., "1.0.0+f5403b0e") to the version string. 
+
+      With this set to false, the About tab will cleanly show "1.0.0",
+      and the version will ONLY change when you manually bump the <Version> 
+      tag above.
+    -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
 </Project>

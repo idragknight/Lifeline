@@ -57,10 +57,12 @@ internal partial class LifelineSettingsWindow : Window
             { "Recovery", new List<OptionRow>() }
         };
 
-        if (_forceRestart != null)
+        // Test & Diagnostics tab exists whenever at least one actionable test
+        // is possible in this process. Host gets Test Grid + Helper Status;
+        // child gets those plus Test Restart.
+        if (_testGrid != null || _forceRestart != null)
         {
             _categorizedOptions.Add("Test & Diagnostics", new List<OptionRow>());
-            BuildTestRows();
         }
 
         foreach (var option in _container.Options)
@@ -75,9 +77,19 @@ internal partial class LifelineSettingsWindow : Window
             _categorizedOptions[category].Add(row);
         }
 
+        // Test Ping goes in the Network tab — it depends on nothing (no
+        // _forceRestart, no _testGrid, no helper), so it should be available
+        // in both host and child processes.
+        _categorizedOptions["Network"].Add(CreatePingTestRow());
+
+        if (_categorizedOptions.ContainsKey("Test & Diagnostics"))
+        {
+            BuildNonPingTestRows();
+        }
+
         var sidebarItems = _categorizedOptions.Keys.ToList();
         sidebarItems.Add("About");
-        
+
         SidebarList.ItemsSource = sidebarItems;
         SidebarList.SelectedIndex = 0;
     }
@@ -101,7 +113,10 @@ internal partial class LifelineSettingsWindow : Window
                 if (_categorizedOptions.TryGetValue(category, out var rows))
                 {
                     OptionsList.ItemsSource = rows;
-                    TestStatusBox.IsVisible = category == "Test & Diagnostics";
+                    // Show the status box whenever this tab has actionable tests
+                    // (Test Ping lives in Network now, so this is broader than
+                    // "category == Test & Diagnostics").
+                    TestStatusBox.IsVisible = rows.Any(r => r.IsTestRow);
                 }
             }
         }
@@ -178,7 +193,7 @@ internal partial class LifelineSettingsWindow : Window
             {
                 var latestInfo = await Task.Run(() => new LifelineVersionInfo());
                 await clipboard.SetTextAsync(latestInfo.DiagnosticsSummary);
-                
+
                 StatusLabel.Text = "Diagnostics copied to clipboard.";
                 StatusLabel.Foreground = okBrush;
                 DispatcherTimer.RunOnce(() => StatusLabel.Text = "", TimeSpan.FromSeconds(2));
@@ -203,14 +218,18 @@ internal partial class LifelineSettingsWindow : Window
         return fallback;
     }
 
-    private void BuildTestRows()
+    /// <summary>
+    /// Test Ping. Moved to the Network tab and available in both host and
+    /// child processes — it depends on nothing this window can't provide.
+    /// </summary>
+    private OptionRow CreatePingTestRow()
     {
-        // 1. Test Ping
-        _categorizedOptions["Test & Diagnostics"].Add(new OptionRow
+        return new OptionRow
         {
             DisplayName = "Test Ping",
             Description = "Pings the configured host to verify network connectivity.",
-            Control = CreateActionButton("Run Ping", async () => 
+            IsTestRow = true,
+            Control = CreateActionButton("Run Ping", async () =>
             {
                 SetTestStatus("Pinging...", "Wait", "#3b82f6");
                 await Task.Run(() =>
@@ -235,81 +254,95 @@ internal partial class LifelineSettingsWindow : Window
                     }
                 });
             })
-        });
+        };
+    }
 
-        // 2. Test Grid
-        _categorizedOptions["Test & Diagnostics"].Add(new OptionRow
+    /// <summary>
+    /// Test Grid, Helper Status, Test Restart. Each is added only when its
+    /// callback exists — host gets the first two, child gets all three.
+    /// Before this change the whole Test & Diagnostics tab was gated on
+    /// _forceRestart (child-only), so the host settings window had no
+    /// diagnostic tests at all — exactly the wrong way around, because the
+    /// tray now guarantees the host wins the settings-window claim.
+    /// </summary>
+    private void BuildNonPingTestRows()
+    {
+        var rows = _categorizedOptions["Test & Diagnostics"];
+
+        if (_testGrid != null)
         {
-            DisplayName = "Test Grid",
-            Description = "Toggles VibeSkua's grid view via the host process (grid ↔ tab).",
-            Control = CreateActionButton("Test Grid", () =>
+            rows.Add(new OptionRow
             {
-                if (_testGrid != null)
+                DisplayName = "Test Grid",
+                Description = "Toggles VibeSkua's grid view via the host process (grid ↔ tab).",
+                IsTestRow = true,
+                Control = CreateActionButton("Test Grid", () =>
                 {
                     _testGrid.Invoke();
                     SetTestStatus("Grid toggle request sent to host.", "OK", "#10b981");
-                }
-                else
-                {
-                    SetTestStatus("Grid trigger not available.", "Warn", "#f59e0b");
-                }
-            })
-        });
+                })
+            });
+        }
 
-        // 3. Check Helper Status / Start Helper
-        _categorizedOptions["Test & Diagnostics"].Add(new OptionRow
+        if (_startHelper != null)
         {
-            DisplayName = "Helper Status",
-            Description = "Verifies that LifelineHelper.exe is running in the background. If not, starts it immediately.",
-            Control = CreateActionButton("Check / Start", () =>
+            rows.Add(new OptionRow
             {
-                try
+                DisplayName = "Helper Status",
+                Description = "Verifies that LifelineHelper.exe is running in the background. If not, starts it immediately.",
+                IsTestRow = true,
+                Control = CreateActionButton("Check / Start", () =>
                 {
-                    var procs = Process.GetProcessesByName("LifelineHelper");
-                    if (procs.Length > 0)
+                    try
                     {
-                        SetTestStatus($"Helper is running (PID {procs[0].Id}) and watching for requests.", "OK", "#10b981");
-                        foreach (var p in procs) p.Dispose();
-                    }
-                    else
-                    {
-                        SetTestStatus("Helper was NOT running. Attempting to start...", "Wait", "#f59e0b");
-                        _startHelper?.Invoke();
-                        
-                        // Give it a brief moment to spin up before checking again
-                        DispatcherTimer.RunOnce(() => 
+                        var procs = Process.GetProcessesByName("LifelineHelper");
+                        if (procs.Length > 0)
                         {
-                            var newProcs = Process.GetProcessesByName("LifelineHelper");
-                            if (newProcs.Length > 0)
-                            {
-                                SetTestStatus($"Helper started successfully (PID {newProcs[0].Id}).", "OK", "#10b981");
-                                foreach (var p in newProcs) p.Dispose();
-                            }
-                            else
-                            {
-                                SetTestStatus("Failed to start Helper. Check lifeline.log for details.", "Fail", "#ef4444");
-                            }
-                        }, TimeSpan.FromSeconds(1));
-                    }
-                }
-                catch (Exception ex)
-                {
-                    SetTestStatus($"Status Error: {ex.Message}", "Fail", "#ef4444");
-                }
-            })
-        });
+                            SetTestStatus($"Helper is running (PID {procs[0].Id}) and watching for requests.", "OK", "#10b981");
+                            foreach (var p in procs) p.Dispose();
+                        }
+                        else
+                        {
+                            SetTestStatus("Helper was NOT running. Attempting to start...", "Wait", "#f59e0b");
+                            _startHelper.Invoke();
 
-        // 4. Test Restart
-        _categorizedOptions["Test & Diagnostics"].Add(new OptionRow
+                            DispatcherTimer.RunOnce(() =>
+                            {
+                                var newProcs = Process.GetProcessesByName("LifelineHelper");
+                                if (newProcs.Length > 0)
+                                {
+                                    SetTestStatus($"Helper started successfully (PID {newProcs[0].Id}).", "OK", "#10b981");
+                                    foreach (var p in newProcs) p.Dispose();
+                                }
+                                else
+                                {
+                                    SetTestStatus("Failed to start Helper. Check lifeline.log for details.", "Fail", "#ef4444");
+                                }
+                            }, TimeSpan.FromSeconds(1));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        SetTestStatus($"Status Error: {ex.Message}", "Fail", "#ef4444");
+                    }
+                })
+            });
+        }
+
+        if (_forceRestart != null)
         {
-            DisplayName = "Test Restart",
-            Description = "Writes the restart request and immediately exits the client. The Helper will relaunch it.",
-            Control = CreateActionButton("Test Restart", () =>
+            rows.Add(new OptionRow
             {
-                SetTestStatus("Writing request and exiting client...", "Wait", "#3b82f6");
-                DispatcherTimer.RunOnce(() => _forceRestart!.Invoke(), TimeSpan.FromMilliseconds(500));
-            }, true)
-        });
+                DisplayName = "Test Restart",
+                Description = "Writes the restart request and immediately exits the client. The Helper will relaunch it.",
+                IsTestRow = true,
+                Control = CreateActionButton("Test Restart", () =>
+                {
+                    SetTestStatus("Writing request and exiting client...", "Wait", "#3b82f6");
+                    DispatcherTimer.RunOnce(() => _forceRestart.Invoke(), TimeSpan.FromMilliseconds(500));
+                }, true)
+            });
+        }
     }
 
     private Button CreateActionButton(string text, Action onClick, bool isDanger = false)
@@ -359,12 +392,12 @@ internal partial class LifelineSettingsWindow : Window
 
         if (option.Type == typeof(bool))
         {
-            var toggle = new ToggleSwitch 
-            { 
-                IsChecked = _container.Get<bool>(option), 
+            var toggle = new ToggleSwitch
+            {
+                IsChecked = _container.Get<bool>(option),
                 VerticalAlignment = VerticalAlignment.Center,
-                OnContent = "", 
-                OffContent = "" 
+                OnContent = "",
+                OffContent = ""
             };
             toggle.IsCheckedChanged += (_, _) => SaveOption(option, toggle.IsChecked == true);
             input = toggle;
@@ -379,7 +412,7 @@ internal partial class LifelineSettingsWindow : Window
         {
             var targets = new List<string> { "8.8.8.8", "1.1.1.1", "9.9.9.9", "208.67.222.222", "google.com", "cloudflare.com" };
             string current = _container.GetDirect(option);
-            
+
             if (!string.IsNullOrEmpty(current) && !targets.Contains(current))
             {
                 targets.Insert(0, current);
@@ -393,7 +426,7 @@ internal partial class LifelineSettingsWindow : Window
                 VerticalAlignment = VerticalAlignment.Center,
                 HorizontalContentAlignment = HorizontalAlignment.Left
             };
-            
+
             combo.SelectionChanged += (_, _) =>
             {
                 if (combo.SelectedItem is string s)
@@ -403,9 +436,9 @@ internal partial class LifelineSettingsWindow : Window
         }
         else
         {
-            var tb = new TextBox 
-            { 
-                Text = _container.GetDirect(option), 
+            var tb = new TextBox
+            {
+                Text = _container.GetDirect(option),
                 Width = 180,
                 VerticalAlignment = VerticalAlignment.Center,
                 VerticalContentAlignment = VerticalAlignment.Center
@@ -588,19 +621,21 @@ internal partial class LifelineSettingsWindow : Window
     {
         _container.SetDefaults();
         _container.Save();
-        
+
         if (SidebarList.SelectedItem is string category && _categorizedOptions.TryGetValue(category, out var rows))
         {
             foreach (var row in rows)
             {
+                if (row.IsTestRow) continue;   // test buttons have no saved state
+
                 var option = _container.Options.FirstOrDefault(x => x.DisplayName == row.DisplayName);
                 if (option != null)
                 {
-                    if (row.Control is ToggleSwitch toggle) 
+                    if (row.Control is ToggleSwitch toggle)
                         toggle.IsChecked = _container.Get<bool>(option);
                     else if (row.Control is ComboBox combo)
                         combo.SelectedItem = _container.GetDirect(option);
-                    else if (row.Control is TextBox tb) 
+                    else if (row.Control is TextBox tb)
                         tb.Text = _container.GetDirect(option);
                     else if (row.Control is Border container && container.Child is Grid g)
                     {
@@ -622,5 +657,6 @@ internal partial class LifelineSettingsWindow : Window
         public string DisplayName { get; set; } = "";
         public string Description { get; set; } = "";
         public Control Control { get; set; } = null!;
+        public bool IsTestRow { get; set; }
     }
 }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
+using Avalonia.Controls;
 using Skua.Core.Interfaces;
 using Skua.Core.Models;
 
@@ -218,14 +219,6 @@ public sealed class LifelinePlugin : ISkuaPlugin
         catch { }
     }
 
-    /// <summary>
-    /// The label to use for log lines written by this process. Returns "host"
-    /// for the tab manager, the account display name for a logged-in child,
-    /// or "child" if the bot hasn't loaded a username yet. Better than the
-    /// old "?" fallback because every line is now attributable to a real
-    /// process — critical when several processes are trying to claim the
-    /// same tray request at the same time.
-    /// </summary>
     private string ProcessLabel()
     {
         if (ProcessKind.IsHost) return "host";
@@ -252,6 +245,26 @@ public sealed class LifelinePlugin : ISkuaPlugin
         return user;
     }
 
+    /// <summary>
+    /// Forces a window to the front. Windows restricts background processes
+    /// from stealing focus, so simply calling Activate() often only flashes
+    /// the taskbar. Toggling Topmost trick forces the OS to bring it forward.
+    /// </summary>
+    private static void BringToFront(Window window)
+    {
+        if (window.WindowState == WindowState.Minimized)
+        {
+            window.WindowState = WindowState.Normal;
+        }
+        
+        window.Activate();
+        
+        // The Topmost toggle bypasses Windows foreground lock restrictions
+        window.Topmost = true;
+        window.Topmost = false;
+        window.Focus();
+    }
+
     private void ShowSettings()
     {
         if ((DateTime.UtcNow - _lastSettingsOpenUtc) < TrayDebounce)
@@ -276,7 +289,7 @@ public sealed class LifelinePlugin : ISkuaPlugin
             {
                 if (_settingsWindow is { IsVisible: true })
                 {
-                    _settingsWindow.Activate();
+                    BringToFront(_settingsWindow);
                     return;
                 }
 
@@ -326,6 +339,9 @@ public sealed class LifelinePlugin : ISkuaPlugin
                     _settingsWindow = new LifelineSettingsWindow(oc, OpenLog, forceRestart, testGrid, EnsureHelperRunning);
                     _settingsWindow.Closed += (_, _) => _settingsWindow = null;
                     _settingsWindow.Show();
+                    
+                    BringToFront(_settingsWindow);
+                    
                     LifelineLog.Write(ProcessLabel(), "settings window shown");
                 }
                 catch (Exception ex)
@@ -360,13 +376,16 @@ public sealed class LifelinePlugin : ISkuaPlugin
             {
                 if (_logWindow is { IsVisible: true })
                 {
-                    _logWindow.Activate();
+                    BringToFront(_logWindow);
                     return;
                 }
 
                 _logWindow = new LifelineLogWindow(path);
                 _logWindow.Closed += (_, _) => _logWindow = null;
                 _logWindow.Show();
+                
+                BringToFront(_logWindow);
+                
                 LifelineLog.Write(ProcessLabel(), "log window shown");
             });
         }
@@ -484,25 +503,10 @@ public sealed class LifelinePlugin : ISkuaPlugin
         return Path.Combine(appData, "VibeSkua", "lifeline");
     }
 
-    /// <summary>
-    /// Atomically claim a tray request file. Only one process can hold the
-    /// exclusive handle. Uses FileStream + FileShare.None + DeleteOnClose.
-    ///
-    /// HOST PREFERENCE: if the host process is alive, only the host claims.
-    /// Clients check via --host-pid and defer. This guarantees the tray's
-    /// "Open Log Window" / "Open Plugin Settings" opens exactly ONE window
-    /// in exactly ONE process (the host), instead of one per process that
-    /// happens to win a claim race at different times.
-    ///
-    /// Standalone mode (single client, no --host-pid): the client claims
-    /// normally, so tray actions still work without a host.
-    /// </summary>
     private bool TryClaimRequest(string path, string kind)
     {
         string file = Path.GetFileName(path);
 
-        // Host preference: if a host process is running and we're not it,
-        // defer to the host so it's the single winner.
         if (!ProcessKind.IsHost && HostProcessAlive())
         {
             return false;
@@ -549,11 +553,6 @@ public sealed class LifelinePlugin : ISkuaPlugin
         return false;
     }
 
-    /// <summary>
-    /// True if a live host process exists (per --host-pid command-line arg).
-    /// Cached after first successful lookup because the answer won't change
-    /// during a process's lifetime.
-    /// </summary>
     private static bool? _hostAliveCache;
 
     private static bool HostProcessAlive()
