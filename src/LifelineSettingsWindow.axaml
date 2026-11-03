@@ -1,0 +1,341 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="using:Skua.Shared.Avalonia.Controls.Shell"
+        x:Class="Lifeline.LifelineSettingsWindow"
+        Title="Lifeline Settings"
+        Width="850" Height="620"
+        MinWidth="620" MinHeight="440"
+        SystemDecorations="BorderOnly"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="NoChrome"
+        ExtendClientAreaTitleBarHeightHint="32"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource SkuaPageBrush}"
+        Classes="skua">
+    <Window.Styles>
+        <!-- Sidebar ListBox -->
+        <Style Selector="ListBox">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style Selector="ListBoxItem">
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Margin" Value="2,1"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="MinHeight" Value="0"/>
+        </Style>
+        <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SkuaNavHoverBrush}"/>
+        </Style>
+        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SkuaAccentTintBrush}"/>
+        </Style>
+        <Style Selector="ListBoxItem:selected:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SkuaAccentTintStrongBrush}"/>
+        </Style>
+        <Style Selector="ListBoxItem:selected TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource SkuaAccentBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        
+        <!-- Standard Buttons -->
+        <Style Selector="Button">
+            <Setter Property="Background" Value="{DynamicResource SkuaSurfaceBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource SkuaTextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SkuaBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="14,6"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+        <Style Selector="Button:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SkuaSurfaceAltBrush}"/>
+        </Style>
+        <Style Selector="Button:pointerover">
+            <Setter Property="BorderBrush" Value="{DynamicResource SkuaAccentHoverBrush}"/>
+        </Style>
+        
+        <!-- Primary Buttons (Accent) -->
+        <Style Selector="Button.skua-primary">
+            <Setter Property="Background" Value="{DynamicResource SkuaAccentBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource SkuaAccentForegroundBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SkuaAccentBrush}"/>
+        </Style>
+        <Style Selector="Button.skua-primary:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SkuaAccentHoverBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SkuaAccentHoverBrush}"/>
+        </Style>
+        <Style Selector="Button.skua-primary:pointerover">
+            <Setter Property="BorderBrush" Value="{DynamicResource SkuaAccentHoverBrush}"/>
+        </Style>
+
+        <!-- Danger Buttons (Red) -->
+        <Style Selector="Button.danger">
+            <Setter Property="Background" Value="#7F1D1D"/>
+            <Setter Property="Foreground" Value="#FCA5A5"/>
+            <Setter Property="BorderBrush" Value="#EF4444"/>
+        </Style>
+        <Style Selector="Button.danger:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#991B1B"/>
+        </Style>
+        <Style Selector="Button.danger:pointerover">
+            <Setter Property="BorderBrush" Value="#F87171"/>
+        </Style>
+
+        <!-- TextBox Overrides -->
+        <Style Selector="TextBox">
+            <Setter Property="Background" Value="{DynamicResource SkuaSurfaceBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource SkuaTextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SkuaBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="MinHeight" Value="30"/>
+        </Style>
+        <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="{DynamicResource SkuaAccentBrush}"/>
+        </Style>
+
+        <!-- ComboBox Overrides to match TextBox styling -->
+        <Style Selector="ComboBox">
+            <Setter Property="Background" Value="{DynamicResource SkuaSurfaceBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource SkuaTextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SkuaBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="MinHeight" Value="30"/>
+        </Style>
+        <Style Selector="ComboBox:pointerover /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="{DynamicResource SkuaBorderBrush}"/>
+        </Style>
+        <Style Selector="ComboBox:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="{DynamicResource SkuaAccentBrush}"/>
+        </Style>
+        <Style Selector="ComboBoxItem">
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="MinHeight" Value="0"/>
+        </Style>
+
+        <!-- Transparent TextBox used INSIDE the numeric composite. -->
+        <Style Selector="TextBox.lifeline-num-input">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="8,2"/>
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="TextAlignment" Value="Right"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="TextBox.lifeline-num-input:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="Transparent"/>
+        </Style>
+
+        <!-- Spinner arrow buttons: subtle at rest, highlighting on hover. -->
+        <Style Selector="Button.lifeline-num-arrow">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="MinWidth" Value="0"/>
+            <Setter Property="MinHeight" Value="0"/>
+            <Setter Property="Width" Value="22"/>
+            <Setter Property="Height" Value="14"/>
+            <Setter Property="Foreground" Value="{DynamicResource SkuaMutedTextBrush}"/>
+        </Style>
+        <Style Selector="Button.lifeline-num-arrow:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource SkuaTextBrush}"/>
+        </Style>
+        <Style Selector="Button.lifeline-num-arrow:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SkuaNavHoverBrush}"/>
+        </Style>
+        <Style Selector="Button.lifeline-num-arrow:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SkuaAccentTintBrush}"/>
+        </Style>
+
+        <!-- ToggleSwitch -->
+        <Style Selector="ToggleSwitch">
+            <Setter Property="OnContent" Value=""/>
+            <Setter Property="OffContent" Value=""/>
+        </Style>
+
+        <!-- Cards -->
+        <Style Selector="Border.card">
+            <Setter Property="Background" Value="{DynamicResource SkuaSurfaceBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SkuaBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="16,14"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+    </Window.Styles>
+
+    <Grid RowDefinitions="Auto,*,Auto">
+        <!-- Title bar -->
+        <shell:WindowTitleBar Grid.Row="0" TitleText="Lifeline Settings"/>
+
+        <!-- Body: sidebar + content -->
+        <Grid Grid.Row="1" ColumnDefinitions="180,*">
+            <!-- Sidebar -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource SkuaSurfaceAltBrush}"
+                    BorderBrush="{DynamicResource SkuaBorderBrush}"
+                    BorderThickness="0,1,1,0">
+                <ListBox x:Name="SidebarList"
+                         Margin="4,8"
+                         SelectionChanged="SidebarList_SelectionChanged">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}"
+                                       FontSize="13"
+                                       Foreground="{DynamicResource SkuaTextBrush}"/>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+
+            <!-- Content Area -->
+            <Grid Grid.Column="1" RowDefinitions="*,Auto">
+                
+                <!-- Standard Settings View -->
+                <ScrollViewer x:Name="SettingsScroll" Grid.Row="0">
+                    <StackPanel Margin="20">
+                        <ItemsControl x:Name="OptionsList" HorizontalAlignment="Stretch">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Classes="card">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                                            <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding DisplayName}"
+                                                           Foreground="{DynamicResource SkuaTextBrush}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="14"/>
+                                                <TextBlock Text="{Binding Description}"
+                                                           Foreground="{DynamicResource SkuaMutedTextBrush}"
+                                                           FontSize="12"
+                                                           TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                            <ContentControl Grid.Column="1"
+                                                            Content="{Binding Control}"
+                                                            VerticalAlignment="Center"
+                                                            HorizontalAlignment="Right"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- About View (Model 3: Elegant List with Pulse Logo) -->
+                <ScrollViewer x:Name="AboutScroll" Grid.Row="0" IsVisible="False">
+                    <StackPanel Margin="20">
+                        <Border Classes="card" Padding="24">
+                            <StackPanel Spacing="20">
+                                
+                                <!-- Header section with Palette 1 Logo -->
+                                <StackPanel Orientation="Horizontal" Spacing="16">
+                                    <!-- The Pulse Logo (Earthy Tech Palette) -->
+                                    <Border Width="56" Height="56" Background="#0F1402" BorderBrush="#3D5908" BorderThickness="1" CornerRadius="12">
+                                        <Viewbox Width="36" Height="36">
+                                            <Canvas Width="64" Height="64">
+                                                <!-- Dark base track -->
+                                                <Path Data="M8,32 H20 L26,16 L36,52 L44,32 H56" Stroke="#3D5908" StrokeThickness="8" StrokeLineCap="Round" StrokeJoin="Round"/>
+                                                <!-- Bright lime pulse -->
+                                                <Path Data="M8,32 H20 L26,16 L36,52 L44,32 H56" Stroke="#84CC16" StrokeThickness="4" StrokeLineCap="Round" StrokeJoin="Round"/>
+                                            </Canvas>
+                                        </Viewbox>
+                                    </Border>
+                                    
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Text="Lifeline" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource SkuaTextBrush}"/>
+                                        <TextBlock x:Name="AboutPluginVersion" Text="v1.0.0" FontSize="12" FontFamily="Consolas, Courier New, monospace" Foreground="{DynamicResource SkuaMutedTextBrush}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                                
+                                <Border Height="1" Background="{DynamicResource SkuaBorderBrush}" Margin="0,4"/>
+                                
+                                <!-- Key-Value Rows -->
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock Text="Author" Foreground="{DynamicResource SkuaMutedTextBrush}" FontSize="13" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="1" Text="Excite" Foreground="{DynamicResource SkuaTextBrush}" FontFamily="Consolas, Courier New, monospace" FontWeight="SemiBold" FontSize="13"/>
+                                </Grid>
+                                
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock Text="Helper (On Disk)" Foreground="{DynamicResource SkuaMutedTextBrush}" FontSize="13" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="AboutHelperDisk" Grid.Column="1" Text="Not installed" Foreground="{DynamicResource SkuaErrorBrush}" FontFamily="Consolas, Courier New, monospace" FontWeight="SemiBold" FontSize="13"/>
+                                </Grid>
+                                
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock Text="Helper (Running)" Foreground="{DynamicResource SkuaMutedTextBrush}" FontSize="13" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="AboutHelperRunning" Grid.Column="1" Text="Not running" Foreground="{DynamicResource SkuaWarnBrush}" FontFamily="Consolas, Courier New, monospace" FontWeight="SemiBold" FontSize="13"/>
+                                </Grid>
+                                
+                                <Border Height="1" Background="{DynamicResource SkuaBorderBrush}" Margin="0,4"/>
+                                
+                                <!-- Action Buttons -->
+                                <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
+                                    <Button Content="Refresh" Click="RefreshAbout_Click"/>
+                                    <Button Content="View on GitHub" Click="ViewGithub_Click"/>
+                                    <Button Content="Copy Diagnostics" Classes="skua-primary" Click="CopyDiagnostics_Click"/>
+                                </StackPanel>
+
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Dedicated Test Status Dialog Box -->
+                <Border Grid.Row="1"
+                        x:Name="TestStatusBox"
+                        IsVisible="False"
+                        Background="{DynamicResource SkuaSurfaceBrush}"
+                        BorderBrush="{DynamicResource SkuaAccentBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="16,12"
+                        Margin="20,0,20,20"
+                        BoxShadow="0 4 12 0 #40000000">
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <TextBlock x:Name="TestStatusIcon"
+                                   Text="Info"
+                                   FontSize="14"
+                                   FontWeight="Bold"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource SkuaAccentBrush}"/>
+                        <TextBlock x:Name="TestStatusText"
+                                   Text="Ready."
+                                   FontSize="13"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SkuaTextBrush}"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- Footer -->
+        <Border Grid.Row="2"
+                Background="{DynamicResource SkuaSurfaceBrush}"
+                BorderBrush="{DynamicResource SkuaBorderBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="12,8">
+            <Grid ColumnDefinitions="*,Auto">
+                <StackPanel VerticalAlignment="Center" Spacing="2">
+                    <TextBlock x:Name="VersionLabel"
+                               Foreground="{DynamicResource SkuaMutedTextBrush}"
+                               FontSize="11"/>
+                    <TextBlock x:Name="StatusLabel"
+                               Foreground="{DynamicResource SkuaMutedTextBrush}"
+                               FontSize="12"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <Button Content="View Log" Click="ViewLog_Click"/>
+                    <Button Content="Reset Defaults" Click="ResetDefaults_Click"/>
+                    <Button Content="Close" Classes="skua-primary" Click="Close_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

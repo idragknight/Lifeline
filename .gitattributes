@@ -1,0 +1,57 @@
+# ---------------------------------------------------------------------------
+# Default: let Git decide text vs binary, store as LF internally.
+# Per-type rules below override this default.
+# ---------------------------------------------------------------------------
+* text=auto
+
+# ---------------------------------------------------------------------------
+# Source and config — text, no specific eol override.
+# ---------------------------------------------------------------------------
+*.cs        text
+*.csproj    text
+*.axaml     text
+*.manifest  text
+*.props     text
+*.targets   text
+*.sln       text
+*.json      text
+*.md        text
+*.txt       text
+
+# ---------------------------------------------------------------------------
+# Shell scripts MUST be LF on every platform, or bash on Linux/macOS/WSL
+# throws: "/usr/bin/env: 'bash\r': No such file or directory"
+# ---------------------------------------------------------------------------
+*.sh        text eol=lf
+
+# ---------------------------------------------------------------------------
+# PowerShell and batch scripts should be CRLF for Windows tooling
+# (Notepad, older editors, some CI runners).
+# ---------------------------------------------------------------------------
+*.ps1       text eol=crlf
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# ---------------------------------------------------------------------------
+# Repo config files themselves — LF for consistency
+# ---------------------------------------------------------------------------
+.gitignore    text eol=lf
+.gitattributes text eol=lf
+
+# ---------------------------------------------------------------------------
+# Binary files — never normalize, never diff as text
+# ---------------------------------------------------------------------------
+*.ico       binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.dll       binary
+*.exe       binary
+*.pdb       binary
+*.zip       binary
+
+# ---------------------------------------------------------------------------
+# Diff drivers — nicer diffs for C# (function context in hunks)
+# ---------------------------------------------------------------------------
+*.cs        diff=csharp

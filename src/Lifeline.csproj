@@ -1,0 +1,71 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Lifeline</AssemblyName>
+    <RootNamespace>Lifeline</RootNamespace>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <SkuaLib Condition="'$(SkuaLib)' == ''">$(MSBuildThisFileDirectory)..\.deps\lib</SkuaLib>
+    <NoWarn>MSB3277;NU1605</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.12" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.12" />
+  </ItemGroup>
+
+  <!--
+    Skua.Shared.Avalonia is NOT built by build.sh and is not in the auqw/skua
+    repo — it ships as a compiled DLL inside the installed VibeSkua client.
+    Two supported ways to resolve it, tried in order:
+
+      1. A parallel Skua.Shared.Avalonia.csproj checkout two levels up
+         (used by developers hacking on VibeSkua itself).
+
+      2. The DLL from the default VibeSkua install location, expanded via
+         $(LOCALAPPDATA) so it works on any Windows user account without
+         a hardcoded username in the HintPath.
+
+    If neither exists, the CheckSkuaSharedAvalonia target below fails the
+    build with a clear message instead of a cascade of "type not found"
+    errors from every file that references the Avalonia theme API.
+  -->
+
+  <ItemGroup Condition="Exists('..\..\Skua.Shared.Avalonia\Skua.Shared.Avalonia.csproj')">
+    <ProjectReference Include="..\..\Skua.Shared.Avalonia\Skua.Shared.Avalonia.csproj">
+      <Private>false</Private>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup Condition="!Exists('..\..\Skua.Shared.Avalonia\Skua.Shared.Avalonia.csproj')">
+    <Reference Include="Skua.Shared.Avalonia">
+      <HintPath>$(LOCALAPPDATA)\VibeSkua\current\Assemblies\Skua.Shared.Avalonia.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Skua.Core.Interfaces">
+      <HintPath>$(SkuaLib)\Skua.Core.Interfaces.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Skua.Core.Models">
+      <HintPath>$(SkuaLib)\Skua.Core.Models.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Skua.Core.Utils">
+      <HintPath>$(SkuaLib)\Skua.Core.Utils.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="CheckSkuaSharedAvalonia" BeforeTargets="ResolveAssemblyReferences"
+          Condition="!Exists('..\..\Skua.Shared.Avalonia\Skua.Shared.Avalonia.csproj')
+                 AND !Exists('$(LOCALAPPDATA)\VibeSkua\current\Assemblies\Skua.Shared.Avalonia.dll')">
+    <Error Text="Skua.Shared.Avalonia.dll not found. Two ways to fix:&#10;  1. Install VibeSkua 2.0+ to the default location ($(LOCALAPPDATA)\VibeSkua\current\Assemblies\).&#10;  2. Check out the VibeSkua repo alongside this one so ..\..\Skua.Shared.Avalonia\Skua.Shared.Avalonia.csproj exists." />
+  </Target>
+
+</Project>

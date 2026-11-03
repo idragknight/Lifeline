@@ -1,0 +1,201 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:Lifeline"
+        xmlns:shell="using:Skua.Shared.Avalonia.Controls.Shell"
+        x:Class="Lifeline.LifelineLogWindow"
+        Title="Lifeline Log"
+        Width="1000" Height="650"
+        MinWidth="720" MinHeight="420"
+        SystemDecorations="BorderOnly"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="NoChrome"
+        ExtendClientAreaTitleBarHeightHint="32"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource SkuaPageBrush}"
+        Classes="skua">
+    <Window.Styles>
+        <Style Selector="ListBox">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style Selector="ListBoxItem">
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Margin" Value="2,1"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="MinHeight" Value="0"/>
+        </Style>
+        <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SkuaNavHoverBrush}"/>
+        </Style>
+        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SkuaAccentTintBrush}"/>
+        </Style>
+        <Style Selector="ListBoxItem:selected:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SkuaAccentTintStrongBrush}"/>
+        </Style>
+        <Style Selector="ListBoxItem:selected TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource SkuaAccentBrush}"/>
+        </Style>
+        <Style Selector="Button">
+            <Setter Property="Background" Value="{DynamicResource SkuaSurfaceBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource SkuaTextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SkuaBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+        <Style Selector="Button:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SkuaSurfaceAltBrush}"/>
+        </Style>
+        <Style Selector="Button:pointerover">
+            <Setter Property="BorderBrush" Value="{DynamicResource SkuaAccentHoverBrush}"/>
+        </Style>
+        <Style Selector="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource SkuaTextBrush}"/>
+        </Style>
+        <Style Selector="Border.count-badge">
+            <Setter Property="Background" Value="{DynamicResource SkuaSurfaceAltBrush}"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="6,1"/>
+            <Setter Property="MinWidth" Value="22"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Border.log-source-tag">
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="5,1"/>
+            <Setter Property="MinWidth" Value="52"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+            <Setter Property="Margin" Value="0,1,8,0"/>
+        </Style>
+    </Window.Styles>
+
+    <Grid RowDefinitions="Auto,*">
+        <!-- Title bar -->
+        <shell:WindowTitleBar Grid.Row="0" TitleText="Lifeline Log"/>
+
+        <!-- Body: sidebar + content -->
+        <Grid Grid.Row="1" ColumnDefinitions="220,*">
+            <!-- Sidebar tree (Model 3) -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource SkuaSurfaceAltBrush}"
+                    BorderBrush="{DynamicResource SkuaBorderBrush}"
+                    BorderThickness="0,1,1,0">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <ListBox x:Name="SidebarList"
+                             Margin="4,8"
+                             SelectionChanged="SidebarList_SelectionChanged">
+                        <ListBox.DataTemplates>
+                            <DataTemplate DataType="local:LogGroupHeader">
+                                <TextBlock Text="{Binding Name}"
+                                           FontSize="10"
+                                           FontWeight="Bold"
+                                           Foreground="{DynamicResource SkuaMutedTextBrush}"
+                                           Margin="8,10,8,4"
+                                           PointerPressed="GroupHeader_PointerPressed"/>
+                            </DataTemplate>
+                            <DataTemplate DataType="local:LogSourceItem">
+                                <Grid ColumnDefinitions="*,Auto" Margin="{Binding Indent}">
+                                    <TextBlock Text="{Binding Name}"
+                                               FontSize="13"
+                                               Foreground="{DynamicResource SkuaTextBrush}"
+                                               VerticalAlignment="Center"/>
+                                    <Border Grid.Column="1"
+                                            Classes="count-badge"
+                                            IsVisible="{Binding HasCount}">
+                                        <TextBlock Text="{Binding Count}"
+                                                   FontSize="10"
+                                                   Foreground="{DynamicResource SkuaMutedTextBrush}"
+                                                   HorizontalAlignment="Center"/>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.DataTemplates>
+                    </ListBox>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Main content: toolbar + log list + status -->
+            <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto">
+                <!-- Toolbar -->
+                <Border Grid.Row="0"
+                        Background="{DynamicResource SkuaSurfaceBrush}"
+                        BorderBrush="{DynamicResource SkuaBorderBrush}"
+                        BorderThickness="0,1,0,1"
+                        Padding="10,8">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button Content="Refresh" Click="Refresh_Click"/>
+                            <Button Content="Copy Selected" Click="CopySelected_Click"/>
+                            <Button Content="Copy All" Click="CopyAll_Click"/>
+                            <Button Content="Open Folder" Click="OpenFolder_Click"/>
+                            <Button Content="Clear" Click="ClearLog_Click"/>
+                        </StackPanel>
+                        <CheckBox Grid.Column="1"
+                                  x:Name="AutoRefreshCheck"
+                                  Content="Auto-refresh"
+                                  IsChecked="True"
+                                  VerticalAlignment="Center"/>
+                    </Grid>
+                </Border>
+
+                <!-- Log rows -->
+                <Border Grid.Row="1"
+                        Background="{DynamicResource SkuaPageBrush}"
+                        Padding="4">
+                    <ListBox x:Name="LogList"
+                             SelectionMode="Multiple"
+                             Background="Transparent"
+                             BorderThickness="0">
+                        <ListBox.Styles>
+                            <Style Selector="ListBoxItem">
+                                <Setter Property="Padding" Value="4,2"/>
+                                <Setter Property="MinHeight" Value="0"/>
+                            </Style>
+                        </ListBox.Styles>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnDefinitions="Auto,Auto,*">
+                                    <Border Grid.Column="0"
+                                            Classes="log-source-tag"
+                                            Background="{Binding SourceColor}">
+                                        <TextBlock Text="{Binding SourceTag}"
+                                                   FontSize="9"
+                                                   FontWeight="Bold"
+                                                   Foreground="White"
+                                                   HorizontalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding Timestamp}"
+                                               Foreground="{DynamicResource SkuaMutedTextBrush}"
+                                               FontFamily="Consolas, Courier New, monospace"
+                                               FontSize="11"
+                                               Margin="0,1,8,0"
+                                               VerticalAlignment="Top"/>
+                                    <TextBlock Grid.Column="2"
+                                               Text="{Binding Text}"
+                                               Foreground="{Binding TextColor}"
+                                               FontFamily="Consolas, Courier New, monospace"
+                                               FontSize="12"
+                                               TextWrapping="Wrap"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Border>
+
+                <!-- Status bar -->
+                <Border Grid.Row="2"
+                        Background="{DynamicResource SkuaSurfaceBrush}"
+                        BorderBrush="{DynamicResource SkuaBorderBrush}"
+                        BorderThickness="0,1,0,0"
+                        Padding="10,4">
+                    <TextBlock x:Name="StatusLabel"
+                               Foreground="{DynamicResource SkuaMutedTextBrush}"
+                               FontSize="11"/>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

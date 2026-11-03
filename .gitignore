@@ -1,0 +1,57 @@
+# ---------------------------------------------------------------------------
+# .NET build output
+# ---------------------------------------------------------------------------
+[Bb]in/
+[Oo]bj/
+[Pp]ublish/
+
+# ---------------------------------------------------------------------------
+# Downloaded Skua source + compiled Skua.Core.* / Skua.Shared.Avalonia DLLs
+# build.sh clones auqw/skua into .deps/skua and copies the built assemblies
+# into .deps/lib. This folder is ~200 MB. NEVER commit it.
+# ---------------------------------------------------------------------------
+.deps/
+
+# ---------------------------------------------------------------------------
+# IDE
+# ---------------------------------------------------------------------------
+.vs/
+.idea/
+*.user
+*.suo
+*.DotSettings.user
+*.sln.DotSettings
+
+# ---------------------------------------------------------------------------
+# OS
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------------
+# Runtime artifacts
+# These normally live under %APPDATA%\VibeSkua\lifeline\, but if a developer
+# ever runs the helper from the source tree they can leak into the working
+# directory. Defensive ignores are cheap.
+# ---------------------------------------------------------------------------
+*.log
+*.restart.json
+*.restart.processing
+*.restarts
+*.tmp
+helper.version
+openlog.request
+opensettings.request
+openlog.*.request
+opensettings.*.request
+gridrequest/
+
+# ---------------------------------------------------------------------------
+# Secrets / local config
+# ---------------------------------------------------------------------------
+.env
+.env.local
+*.env.local
+secrets.json
+appsettings.local.json
