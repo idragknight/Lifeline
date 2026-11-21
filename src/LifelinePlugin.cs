@@ -245,11 +245,6 @@ public sealed class LifelinePlugin : ISkuaPlugin
         return user;
     }
 
-    /// <summary>
-    /// Forces a window to the front. Windows restricts background processes
-    /// from stealing focus, so simply calling Activate() often only flashes
-    /// the taskbar. Toggling Topmost trick forces the OS to bring it forward.
-    /// </summary>
     private static void BringToFront(Window window)
     {
         if (window.WindowState == WindowState.Minimized)
@@ -259,7 +254,6 @@ public sealed class LifelinePlugin : ISkuaPlugin
         
         window.Activate();
         
-        // The Topmost toggle bypasses Windows foreground lock restrictions
         window.Topmost = true;
         window.Topmost = false;
         window.Focus();
@@ -294,6 +288,8 @@ public sealed class LifelinePlugin : ISkuaPlugin
                 }
 
                 Action? forceRestart = null;
+                Action? testFlash = null;
+
                 if (_service != null)
                 {
                     forceRestart = () =>
@@ -313,6 +309,15 @@ public sealed class LifelinePlugin : ISkuaPlugin
                                 Environment.Exit(0);
                             }
                             catch { Environment.Exit(0); }
+                        }
+                    };
+
+                    testFlash = () =>
+                    {
+                        if (_dialogs?.ShowMessageBox("This will simulate a Flash crash and restart the client. Continue?", "Test Flash Modal", true) == true)
+                        {
+                            LifelineLog.Write(ProcessLabel(), "simulating flash modal crash...");
+                            _service.SimulateFlashModal();
                         }
                     };
                 }
@@ -336,7 +341,7 @@ public sealed class LifelinePlugin : ISkuaPlugin
 
                 try
                 {
-                    _settingsWindow = new LifelineSettingsWindow(oc, OpenLog, forceRestart, testGrid, EnsureHelperRunning);
+                    _settingsWindow = new LifelineSettingsWindow(oc, OpenLog, forceRestart, testGrid, EnsureHelperRunning, testFlash);
                     _settingsWindow.Closed += (_, _) => _settingsWindow = null;
                     _settingsWindow.Show();
                     

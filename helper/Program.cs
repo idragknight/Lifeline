@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Drawing;
 using System.Net.NetworkInformation;
@@ -9,16 +10,22 @@ namespace LifelineHelper;
 
 internal static class Program
 {
+    // FIXED: Removed accidental trailing spaces from the folder names!
     private static readonly string[] RequestDirs =
     {
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VibeSkua", "lifeline", "requests"),
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Skua",     "lifeline", "requests"),
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Skua", "lifeline", "requests"),
     };
+
     private static readonly string LogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "VibeSkua", "lifeline", "helper.log");
 
     private static readonly object LogLock = new();
+    
+    // YOUR FIX: Prevents race conditions where multiple threads try to claim the same file
+    private static readonly ConcurrentDictionary<string, byte> ActiveFiles = new(StringComparer.OrdinalIgnoreCase);
+    
     private static readonly TimeSpan PidDeathTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan StaleProcessingAge = TimeSpan.FromMinutes(15);
 
@@ -53,6 +60,7 @@ internal static class Program
             }
 
             Log("Watching for restart requests. Ctrl+C to stop.");
+
             using ManualResetEventSlim shutdown = new(false);
 
             _ = Task.Run(async () =>
@@ -61,7 +69,6 @@ internal static class Program
                 {
                     try { await Task.Delay(TimeSpan.FromSeconds(30)); } catch { }
                     if (shutdown.IsSet) return;
-
                     foreach (string dir in RequestDirs)
                     {
                         try { ProcessPending(dir); } catch { }
@@ -76,11 +83,8 @@ internal static class Program
             trayThread.SetApartmentState(ApartmentState.STA);
             trayThread.Start();
 
-            try { Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Set(); }; }
-            catch { }
-
-            try { AppDomain.CurrentDomain.ProcessExit += (_, _) => { try { shutdown.Set(); } catch { } }; }
-            catch { }
+            try { Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Set(); }; } catch { }
+            try { AppDomain.CurrentDomain.ProcessExit += (_, _) => { try { shutdown.Set(); } catch { } }; } catch { }
 
             int hostPid = 0;
             for (int i = 0; i < args.Length; i++)
@@ -151,18 +155,15 @@ internal static class Program
             };
 
             ContextMenuStrip menu = new();
-
             var header = new ToolStripMenuItem("Lifeline Helper") { Enabled = false, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
             menu.Items.Add(header);
             menu.Items.Add(new ToolStripSeparator());
-
             menu.Items.Add("Open Log Window", null, (_, _) => SendOpenLogRequest());
             menu.Items.Add("Open Plugin Settings", null, (_, _) => SendOpenSettingsRequest());
             menu.Items.Add("Open Install Folder", null, (_, _) =>
             {
                 try { Process.Start("explorer.exe", AppDomain.CurrentDomain.BaseDirectory); } catch { }
             });
-
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Exit", null, (_, _) =>
             {
@@ -173,7 +174,6 @@ internal static class Program
 
             tray.ContextMenuStrip = menu;
             tray.DoubleClick += (_, _) => SendOpenLogRequest();
-
             tray.ShowBalloonTip(3000, "Lifeline Helper", "Running in the background. Watching for restart requests.", ToolTipIcon.Info);
 
             Task.Run(async () =>
@@ -182,7 +182,6 @@ internal static class Program
                 {
                     await Task.Delay(500);
                 }
-
                 if (tray != null)
                 {
                     tray.Visible = false;
@@ -199,10 +198,6 @@ internal static class Program
         }
     }
 
-    // Unique filename per click. Previously the fixed name "openlog.request" meant
-    // that if the file was left over from a failed claim, the next File.WriteAllText
-    // would fire a "Changed" event on the FileSystemWatcher (which we only handle
-    // as Created), so the button silently did nothing from that point on.
     private static void SendOpenLogRequest()
     {
         try
@@ -274,6 +269,7 @@ internal static class Program
 
     private static void ProcessPending(string dir)
     {
+        // 1. Clean up stale .processing files
         foreach (string file in Directory.EnumerateFiles(dir, "*.restart.processing"))
         {
             try
@@ -286,113 +282,162 @@ internal static class Program
             }
             catch { }
         }
+
+        // 2. MY FIX: Clean up stale .json files that are hopelessly stuck (prevents infinite loops)
         foreach (string file in Directory.EnumerateFiles(dir, "*.restart.json"))
-            _ = Task.Run(() => ProcessRequest(file));
+        {
+            try
+            {
+                if (DateTime.UtcNow - File.GetLastWriteTimeUtc(file) > StaleProcessingAge)
+                {
+                    string failedPath = file + ".failed";
+                    try 
+                    { 
+                        File.Move(file, failedPath, overwrite: true); 
+                        Log($"moved stale unclaimed request to failed: {Path.GetFileName(failedPath)}");
+                    }
+                    catch 
+                    { 
+                        File.Delete(file); 
+                        Log($"deleted stale unclaimed request file: {Path.GetFileName(file)}");
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // 3. Process fresh .json files
+        foreach (string file in Directory.EnumerateFiles(dir, "*.restart.json"))
+        {
+            if (File.Exists(file))
+            {
+                _ = Task.Run(() => ProcessRequest(file));
+            }
+        }
     }
 
     private static void ProcessRequest(string path)
     {
-        if (!File.Exists(path)) return;
-        string processing = path + ".processing";
+        string normalizedPath = Path.GetFullPath(path);
+        if (!File.Exists(normalizedPath)) return;
+        
+        // YOUR FIX: Prevents race conditions
+        if (!ActiveFiles.TryAdd(normalizedPath, 0)) return;
 
-        bool claimed = false;
-        for (int attempt = 0; attempt < 20; attempt++)
-        {
-            try
-            {
-                File.Move(path, processing);
-                claimed = true;
-                break;
-            }
-            catch (FileNotFoundException) { return; }
-            catch (IOException)
-            {
-                if (attempt < 19) Thread.Sleep(50);
-            }
-            catch (Exception ex)
-            {
-                Log($"claim failed: {ex.Message}");
-                return;
-            }
-        }
-
-        if (!claimed)
-        {
-            Log($"could not claim {Path.GetFileName(path)} after 20 attempts; will sweep later");
-            return;
-        }
-
-        bool keep = false;
+        string processing = normalizedPath + ".processing";
+        
         try
         {
-            RestartRequest? req;
-            try { req = JsonSerializer.Deserialize<RestartRequest>(File.ReadAllText(processing)); }
-            catch (Exception ex) { Log($"parse failed: {ex.Message}"); return; }
-
-            if (req is null) { Log("empty request"); return; }
-
-            string scriptName = string.IsNullOrWhiteSpace(req.LoadedScript) ? "(none)" : Path.GetFileName(req.LoadedScript);
-            Log($"Restart Request: {req.Username} ({req.Reason}) | PID: {req.Pid} | Script: {scriptName} (Running: {req.ScriptWasRunning})");
-
-            if (string.Equals(req.Action, "give-up", StringComparison.OrdinalIgnoreCase))
+            bool claimed = false;
+            string? lastIoError = null;
+            
+            // MY FIX: Increased to 60 attempts @ 100ms (6 seconds) to give AV/OneDrive time to release the lock
+            for (int attempt = 0; attempt < 60; attempt++)
             {
-                Log($"GIVE-UP for {req.Username}: {req.Reason}. Not restarting.");
-                return;
-            }
-
-            if (req.Pid > 0 && !WaitForExit(req.Pid))
-            {
-                keep = true;
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(req.Exe) || !File.Exists(req.Exe))
-            {
-                Log($"exe not found: '{req.Exe}' — cannot restart");
-                return;
-            }
-
-            WaitForNetwork(req);
-
-            List<string> args = BuildRelaunchArgs(req);
-            ProcessStartInfo psi = new(req.Exe)
-            {
-                UseShellExecute = false,
-                CreateNoWindow = false,
-                WorkingDirectory = Path.GetDirectoryName(req.Exe) ?? "",
-            };
-            foreach (string a in args) psi.ArgumentList.Add(a);
-
-            List<string> logArgs = new();
-            for (int i = 0; i < args.Count; i++)
-            {
-                if (args[i].Equals("-p", StringComparison.OrdinalIgnoreCase) || args[i].Equals("--password", StringComparison.OrdinalIgnoreCase))
+                try
                 {
-                    i++;
-                    continue;
+                    File.Move(normalizedPath, processing);
+                    claimed = true;
+                    break;
                 }
-                if (args[i].Equals("--use-theme", StringComparison.OrdinalIgnoreCase))
+                catch (FileNotFoundException) { return; }
+                catch (IOException ex)
                 {
-                    i++;
-                    continue;
+                    lastIoError = ex.Message;
+                    if (attempt < 59) Thread.Sleep(100);
                 }
-                logArgs.Add(args[i].Contains(' ') ? $"\"{args[i]}\"" : args[i]);
+                catch (Exception ex)
+                {
+                    Log($"claim failed: {ex.Message}");
+                    return;
+                }
             }
-            Log($"  Relaunch args: {string.Join(" ", logArgs)}");
 
-            Process? spawned = Process.Start(psi);
-            Log($"spawned {req.Exe} (new pid {spawned?.Id})");
+            if (!claimed)
+            {
+                string reason = string.IsNullOrWhiteSpace(lastIoError) ? "unknown lock" : lastIoError;
+                Log($"could not claim {Path.GetFileName(normalizedPath)} after 60 attempts ({reason}); will sweep later");
+                return;
+            }
+
+            bool keep = false;
+            try
+            {
+                RestartRequest? req;
+                try { req = JsonSerializer.Deserialize<RestartRequest>(File.ReadAllText(processing)); }
+                catch (Exception ex) { Log($"parse failed: {ex.Message}"); return; }
+
+                if (req is null) { Log("empty request"); return; }
+
+                string scriptName = string.IsNullOrWhiteSpace(req.LoadedScript) ? "(none)" : Path.GetFileName(req.LoadedScript);
+                Log($"Restart Request: {req.Username} ({req.Reason}) | PID: {req.Pid} | Script: {scriptName} (Running: {req.ScriptWasRunning})");
+
+                if (string.Equals(req.Action, "give-up", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log($"GIVE-UP for {req.Username}: {req.Reason}. Not restarting.");
+                    return;
+                }
+
+                if (req.Pid > 0 && !WaitForExit(req.Pid))
+                {
+                    keep = true;
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(req.Exe) || !File.Exists(req.Exe))
+                {
+                    Log($"exe not found: '{req.Exe}' — cannot restart");
+                    return;
+                }
+
+                WaitForNetwork(req);
+
+                List<string> args = BuildRelaunchArgs(req);
+                ProcessStartInfo psi = new(req.Exe)
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = false,
+                    WorkingDirectory = Path.GetDirectoryName(req.Exe) ?? "",
+                };
+
+                foreach (string a in args) psi.ArgumentList.Add(a);
+
+                List<string> logArgs = new();
+                for (int i = 0; i < args.Count; i++)
+                {
+                    if (args[i].Equals("-p", StringComparison.OrdinalIgnoreCase) || args[i].Equals("--password", StringComparison.OrdinalIgnoreCase))
+                    {
+                        i++;
+                        continue;
+                    }
+                    if (args[i].Equals("--use-theme", StringComparison.OrdinalIgnoreCase))
+                    {
+                        i++;
+                        continue;
+                    }
+                    logArgs.Add(args[i].Contains(' ') ? $"\"{args[i]}\"" : args[i]);
+                }
+
+                Log($"  Relaunch args: {string.Join(" ", logArgs)}");
+                Process? spawned = Process.Start(psi);
+                Log($"spawned {req.Exe} (new pid {spawned?.Id})");
+            }
+            finally
+            {
+                try
+                {
+                    if (keep && File.Exists(processing))
+                        File.Move(processing, normalizedPath, overwrite: true);
+                    else if (File.Exists(processing))
+                        File.Delete(processing);
+                }
+                catch { }
+            }
         }
         finally
         {
-            try
-            {
-                if (keep && File.Exists(processing))
-                    File.Move(processing, path, overwrite: true);
-                else if (File.Exists(processing))
-                    File.Delete(processing);
-            }
-            catch { }
+            // YOUR FIX: Ensure the file is removed from the active dictionary
+            ActiveFiles.TryRemove(normalizedPath, out _);
         }
     }
 
@@ -422,6 +467,7 @@ internal static class Program
             try { Thread.Sleep(TimeSpan.FromSeconds(intervalSec)); }
             catch { return; }
         }
+
         Log($"Ping wait exceeded {req.PingWaitMaxSec}s — relaunching anyway");
     }
 
@@ -454,6 +500,7 @@ internal static class Program
 
         string? runScript = null;
         string? loadScript = null;
+
         if (!string.IsNullOrWhiteSpace(req.LoadedScript))
         {
             if (req.ScriptWasRunning) runScript = req.LoadedScript;
@@ -498,22 +545,25 @@ internal static class Program
         {
             using Process old = Process.GetProcessById(pid);
             Log($"Waiting for client (PID {pid}) to exit...");
-            if (old.WaitForExit(PidDeathTimeout))
+
+            if (old.WaitForExit((int)PidDeathTimeout.TotalMilliseconds))
             {
                 Log($"Client exited cleanly.");
                 return true;
             }
+
             Log($"Client did not exit within timeout — attempting kill.");
             try
             {
                 old.Kill(entireProcessTree: true);
-                if (old.WaitForExit(TimeSpan.FromSeconds(5)))
+                if (old.WaitForExit(5000))
                 {
                     Log($"Client killed.");
                     return true;
                 }
             }
             catch (Exception ex) { Log($"kill failed: {ex.Message}"); }
+
             Log($"Could not terminate client — leaving request in place");
             return false;
         }
@@ -531,7 +581,7 @@ internal static class Program
 
     private static void Log(string message)
     {
-        string line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {message}";
+        string line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [HELPER] {message}";
         lock (LogLock)
         {
             try

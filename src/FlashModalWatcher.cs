@@ -5,20 +5,13 @@ using System.Text;
 namespace Lifeline;
 
 /// <summary>
-/// Polls every 200 ms for the "Please reinstall CleanFlash" message box that
-/// VibeSkua's FlashUtil shows when the Flash OCX fails to initialize.
-///
-/// v1.1.0 fix: no longer restricts matches to our own PID. The modal can be owned
-/// by FlashUtil.exe (a separate process) — the previous PID filter silently
-/// missed it, which is why some clients just died with no restart request. A
-/// match is now accepted if the owner is (a) us, (b) an exe in the same directory
-/// as us, or (c) a process named Flash*/CleanFlash* (FlashUtil, FlashPlayerUpdate).
-/// That avoids false positives from other VibeSkua installs running in parallel.
-///
-/// v1.1.1 fix: also inspects the text of standard Win32 dialogs (#32770), because
-/// the Flash Player can pop a dialog with a generic title (e.g. "SetOptions")
-/// whose *body* says to reinstall CleanFlash. Also adds "SetOptions" to the
-/// title patterns in case the dialog is rendered by Avalonia.
+/// Polls for the "Please reinstall CleanFlash" or "SetOptions" message box.
+/// 
+/// v1.2.0 fix: VibeSkua 2.0+ uses Avalonia for its UI. Avalonia draws text
+/// on a Skia canvas rather than creating native HWNDs for every label. 
+/// Therefore, EnumChildWindows will NEVER find the text inside the popup.
+/// We must rely entirely on matching the Window Title (e.g. "SetOptions")
+/// while verifying the window belongs to our process or a Flash helper.
 /// </summary>
 internal sealed class FlashModalWatcher : IDisposable
 {
@@ -31,6 +24,7 @@ internal sealed class FlashModalWatcher : IDisposable
         "Flash Player required",
         "flash player required",
         "SetOptions",
+        "Please log-in before starting the bot"
     };
 
     private readonly Action<string> _log;
@@ -75,8 +69,6 @@ internal sealed class FlashModalWatcher : IDisposable
     private static string? FindMatchingWindowTitle()
     {
         int ourPid = Environment.ProcessId;
-        string ourDir = "";
-        try { ourDir = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? ""; } catch { }
         string? found = null;
 
         EnumWindows((hWnd, _) =>
@@ -85,88 +77,65 @@ internal sealed class FlashModalWatcher : IDisposable
             {
                 if (!IsWindowVisible(hWnd)) return true;
 
-                bool matches = false;
                 string title = "";
-
-                // 1. Check title
                 int len = GetWindowTextLength(hWnd);
                 if (len > 0)
                 {
                     StringBuilder sb = new(len + 1);
                     GetWindowText(hWnd, sb, sb.Capacity);
                     title = sb.ToString();
-
-                    foreach (string pat in TitlePatterns)
-                    {
-                        if (title.IndexOf(pat, StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            matches = true;
-                            break;
-                        }
-                    }
                 }
 
-                // 2. Check dialog body text (if title didn't match)
-                if (!matches)
+                if (string.IsNullOrWhiteSpace(title)) return true;
+
+                // 1. Check if the title matches our patterns
+                bool matches = false;
+                foreach (string pat in TitlePatterns)
                 {
-                    StringBuilder classSb = new(256);
-                    GetClassName(hWnd, classSb, classSb.Capacity);
-                    // #32770 is the standard Win32 dialog class
-                    if (classSb.ToString().Equals("#32770", StringComparison.OrdinalIgnoreCase))
+                    if (title.IndexOf(pat, StringComparison.OrdinalIgnoreCase) >= 0)
                     {
-                        EnumChildWindows(hWnd, (childHwnd, _) =>
-                        {
-                            int cLen = GetWindowTextLength(childHwnd);
-                            if (cLen > 0)
-                            {
-                                StringBuilder cSb = new(cLen + 1);
-                                GetWindowText(childHwnd, cSb, cSb.Capacity);
-                                string childText = cSb.ToString();
-                                if (childText.IndexOf("reinstall CleanFlash", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                    childText.IndexOf("reinstall Flash", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                    childText.IndexOf("Clean Flash missing", StringComparison.OrdinalIgnoreCase) >= 0)
-                                {
-                                    matches = true;
-                                    if (string.IsNullOrEmpty(title))
-                                        title = "Dialog body matched 'reinstall CleanFlash'";
-                                    return false; // stop enumerating children
-                                }
-                            }
-                            return true;
-                        }, IntPtr.Zero);
+                        matches = true;
+                        break;
                     }
                 }
 
                 if (!matches) return true;
 
-                // 3. Verify ownership
+                // 2. Verify ownership (Prevents false positives from other apps)
                 GetWindowThreadProcessId(hWnd, out uint pid);
-                if ((int)pid == ourPid) { found = title; return false; }
+                
+                // If it's our own process, it's definitely VibeSkua
+                if ((int)pid == ourPid) 
+                { 
+                    found = title; 
+                    return false; 
+                }
 
-                string ownerExe = "", ownerName = "";
+                // If it's a child process (e.g., FlashUtil spawned by VibeSkua)
+                string ownerName = "";
                 try
                 {
                     using Process p = Process.GetProcessById((int)pid);
-                    try { ownerExe = p.MainModule?.FileName ?? ""; } catch { }
-                    try { ownerName = p.ProcessName ?? ""; } catch { }
+                    ownerName = p.ProcessName ?? "";
                 }
                 catch { }
 
-                bool sameDir = !string.IsNullOrEmpty(ownerExe) && !string.IsNullOrEmpty(ourDir) &&
-                    string.Equals(Path.GetDirectoryName(ownerExe), ourDir, StringComparison.OrdinalIgnoreCase);
-                bool flashHelper =
+                bool isFlashProcess = 
                     ownerName.StartsWith("Flash", StringComparison.OrdinalIgnoreCase) ||
                     ownerName.StartsWith("CleanFlash", StringComparison.OrdinalIgnoreCase);
 
-                if (sameDir || flashHelper)
+                if (isFlashProcess)
                 {
                     found = title;
                     return false;
                 }
-                return true;
+
+                // If we get here, the title matched, but it belongs to an unrelated app.
+                return true; 
             }
             catch { return true; }
         }, IntPtr.Zero);
+        
         return found;
     }
 
@@ -179,10 +148,8 @@ internal sealed class FlashModalWatcher : IDisposable
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-    [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
     [DllImport("user32.dll")] private static extern int GetWindowTextLength(IntPtr hWnd);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
 }

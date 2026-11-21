@@ -30,6 +30,7 @@ internal sealed class LifelineService : IDisposable
     private ScriptHeartbeat _lastRunningHeartbeat;
     private int _restartInFlight;
     private RestartContext _blipContext;
+    private int _watcherStopVersion = 0;
 
     private readonly record struct ScriptHeartbeat(string? LoadedScript, string? Storage, DateTime Timestamp);
     private readonly record struct HealthResult(bool Healthy, string Reason);
@@ -59,11 +60,6 @@ internal sealed class LifelineService : IDisposable
         if (_disposed) return;
         RefreshCachedUsername();
 
-        // FlashModalWatcher is now started on demand from OnEarlyWarning() and
-        // stopped when the recovery cycle finishes — see EnsureModalWatcherRunning
-        // and StopModalWatcher. This avoids 5 Hz desktop-wide EnumWindows during
-        // normal play, when the modal can't possibly appear.
-
         _detector.Start();
         _ = Task.Run(HeartbeatLoop, _cts.Token);
         _ = Task.Run(HousekeepingLoop, _cts.Token);
@@ -74,16 +70,54 @@ internal sealed class LifelineService : IDisposable
     public void Stop() => _cts.Cancel();
 
     /// <summary>
-    /// Exposed for the Settings window Test tab. Bypasses the watcher and triggers
-    /// the exact same logic used when a Flash modal is actually detected.
+    /// Simulates a Flash crash by spawning a fake Avalonia window titled "SetOptions".
+    /// This allows us to test the FlashModalWatcher end-to-end without actually crashing.
     /// </summary>
-    public void SimulateFlashModal() => HandleFlashModal();
+    public void SimulateFlashModal()
+    {
+        Log("simulating flash modal: starting watcher and showing fake popup");
+        
+        EnsureModalWatcherRunning();
+
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                var win = new Avalonia.Controls.Window
+                {
+                    Title = "SetOptions",
+                    Width = 550,
+                    Height = 160,
+                    WindowStartupLocation = Avalonia.Controls.WindowStartupLocation.CenterScreen,
+                    CanResize = false,
+                    ShowInTaskbar = true,
+                    Topmost = true,
+                    Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#1E1E1E")),
+                    Content = new Avalonia.Controls.TextBlock
+                    {
+                        Text = "Please log-in before starting the bot.\nIf already logged in but still seeing this, reinstall CleanFlash.",
+                        Foreground = Avalonia.Media.Brushes.White,
+                        Margin = new Avalonia.Thickness(20),
+                        FontSize = 14,
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                    }
+                };
+                win.Show();
+            }
+            catch (Exception ex)
+            {
+                Log($"failed to show test window: {ex.Message}");
+            }
+        });
+    }
 
     private void OnEarlyWarning()
     {
         RefreshCachedUsername();
         Log("first ping failed (early warning)");
         TrySuppressAutoRelogin();
+        
+        Interlocked.Increment(ref _watcherStopVersion);
         EnsureModalWatcherRunning();
     }
 
@@ -93,7 +127,7 @@ internal sealed class LifelineService : IDisposable
         if (!_recovering)
         {
             RestoreAutoReloginIfSuppressed("early-warning-cleared");
-            StopModalWatcher("early-warning-cleared");
+            ScheduleStopModalWatcher(60, "early-warning-cleared");
         }
     }
 
@@ -146,6 +180,7 @@ internal sealed class LifelineService : IDisposable
                 return;
             }
 
+            // 1. Wait for the raw network (ICMP) to be stable for X seconds.
             int stableSec = Math.Max(3, Opt("restoreStableSec", 10));
             if (!await WaitForStableRestore(stableSec, ct))
             {
@@ -154,11 +189,45 @@ internal sealed class LifelineService : IDisposable
                 return;
             }
 
+            // 2. Wait for the grace period. During this time, VibeSkua's auto-relogin
+            // is still suppressed, so it won't spam the login server while the game
+            // servers are still recovering.
             int graceSec = Math.Max(0, Opt("graceAfterRestoreSec", 10));
             if (graceSec > 0)
             {
+                Log($"network stable, waiting {graceSec}s grace period before allowing login");
                 try { await Task.Delay(TimeSpan.FromSeconds(graceSec), ct); }
-                catch (OperationCanceledException) { RestoreAutoReloginIfSuppressed("cancelled"); return; }
+                catch (OperationCanceledException) { return; }
+            }
+
+            // 3. NOW it is safe to restore VibeSkua's auto-relogin. It will attempt
+            // a single, clean login without spamming the Flash control.
+            RestoreAutoReloginIfSuppressed("network-restored-after-grace");
+
+            // 4. Give it up to 20 seconds to actually finish logging in
+            Log("waiting up to 20s for client to log back in...");
+            bool loginSuccess = false;
+            for (int i = 0; i < 20; i++)
+            {
+                try 
+                { 
+                    if (_bot.Player.LoggedIn && _bot.Player.Playing) 
+                    {
+                        loginSuccess = true;
+                        break; 
+                    } 
+                } 
+                catch { }
+                try { await Task.Delay(1000, ct); } catch (OperationCanceledException) { return; }
+            }
+
+            if (loginSuccess)
+            {
+                Log("client successfully logged back in naturally");
+            }
+            else
+            {
+                Log("client failed to log back in after 20s, proceeding to health check");
             }
 
             HealthResult health = await HealthCheck(context, ct);
@@ -166,7 +235,6 @@ internal sealed class LifelineService : IDisposable
 
             if (health.Healthy)
             {
-                RestoreAutoReloginIfSuppressed("healthy");
                 RestartRequestWriter.PruneState(GetCachedUsername());
                 return;
             }
@@ -174,13 +242,11 @@ internal sealed class LifelineService : IDisposable
             if (!Opt("restartOnFailure", true))
             {
                 Log("stage 2 disabled; leaving client running");
-                RestoreAutoReloginIfSuppressed("stage2-disabled");
                 return;
             }
             if (Opt("respectExitOnScriptStop", true) && LaunchedWithExitOnScriptStop())
             {
                 Log("declining restart: client was launched with --exit-on-script-stop");
-                RestoreAutoReloginIfSuppressed("exit-on-script-stop");
                 return;
             }
 
@@ -204,11 +270,9 @@ internal sealed class LifelineService : IDisposable
                         break;
                     case WriteOutcome.GiveUp:
                         Log("gave up (rate limit)");
-                        RestoreAutoReloginIfSuppressed("give-up");
                         break;
                     case WriteOutcome.Failed:
                         Log("could not write restart request");
-                        RestoreAutoReloginIfSuppressed("write-failed");
                         break;
                 }
             }
@@ -222,7 +286,7 @@ internal sealed class LifelineService : IDisposable
         finally
         {
             _recovering = false;
-            StopModalWatcher("recovery-cycle-complete");
+            ScheduleStopModalWatcher(60, "recovery-cycle-complete");
         }
     }
 
@@ -402,6 +466,21 @@ internal sealed class LifelineService : IDisposable
         try { _modalWatcher.Dispose(); } catch { }
         _modalWatcher = null;
         Log($"flash modal watcher stopped ({reason})");
+    }
+
+    private void ScheduleStopModalWatcher(int delaySeconds, string reason)
+    {
+        int version = Interlocked.Increment(ref _watcherStopVersion);
+        _ = Task.Run(async () =>
+        {
+            try { await Task.Delay(TimeSpan.FromSeconds(delaySeconds), _cts.Token); }
+            catch (OperationCanceledException) { return; }
+
+            if (version == _watcherStopVersion && !_disposed)
+            {
+                StopModalWatcher(reason);
+            }
+        });
     }
 
     private void HandleFlashModal()
@@ -605,9 +684,6 @@ internal sealed class LifelineService : IDisposable
 
     private void Log(string message)
     {
-        // Only write to the Lifeline log (lifeline.log → Lifeline log window).
-        // Do NOT write to the Skua script log — the user wants Lifeline messages
-        // kept out of the client UI's script output entirely.
         string who = GetCachedUsername();
         LifelineLog.Write(who, message);
     }
@@ -669,6 +745,7 @@ internal sealed class LifelineService : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        Interlocked.Increment(ref _watcherStopVersion);
         try { _cts.Cancel(); } catch { }
         try { _modalWatcher?.Dispose(); } catch { }
         try { _detector.Dispose(); } catch { }

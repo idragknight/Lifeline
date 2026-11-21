@@ -22,6 +22,7 @@ internal partial class LifelineSettingsWindow : Window
     private readonly Action? _forceRestart;
     private readonly Action? _testGrid;
     private readonly Action? _startHelper;
+    private readonly Action? _testFlashModal;
 
     private readonly LifelineVersionInfo _versionInfo = new();
     private Dictionary<string, List<OptionRow>> _categorizedOptions = new();
@@ -31,7 +32,8 @@ internal partial class LifelineSettingsWindow : Window
         Action openLog,
         Action? forceRestart = null,
         Action? testGrid = null,
-        Action? startHelper = null)
+        Action? startHelper = null,
+        Action? testFlashModal = null)
     {
         InitializeComponent();
         LifelineTheme.Apply(this);
@@ -41,6 +43,7 @@ internal partial class LifelineSettingsWindow : Window
         _forceRestart = forceRestart;
         _testGrid     = testGrid;
         _startHelper  = startHelper;
+        _testFlashModal = testFlashModal;
 
         VersionLabel.Text = _versionInfo.ShortLabel;
         LoadOptions();
@@ -57,9 +60,6 @@ internal partial class LifelineSettingsWindow : Window
             { "Recovery", new List<OptionRow>() }
         };
 
-        // Test & Diagnostics tab exists whenever at least one actionable test
-        // is possible in this process. Host gets Test Grid + Helper Status;
-        // child gets those plus Test Restart.
         if (_testGrid != null || _forceRestart != null)
         {
             _categorizedOptions.Add("Test & Diagnostics", new List<OptionRow>());
@@ -77,9 +77,6 @@ internal partial class LifelineSettingsWindow : Window
             _categorizedOptions[category].Add(row);
         }
 
-        // Test Ping goes in the Network tab — it depends on nothing (no
-        // _forceRestart, no _testGrid, no helper), so it should be available
-        // in both host and child processes.
         _categorizedOptions["Network"].Add(CreatePingTestRow());
 
         if (_categorizedOptions.ContainsKey("Test & Diagnostics"))
@@ -113,9 +110,6 @@ internal partial class LifelineSettingsWindow : Window
                 if (_categorizedOptions.TryGetValue(category, out var rows))
                 {
                     OptionsList.ItemsSource = rows;
-                    // Show the status box whenever this tab has actionable tests
-                    // (Test Ping lives in Network now, so this is broader than
-                    // "category == Test & Diagnostics").
                     TestStatusBox.IsVisible = rows.Any(r => r.IsTestRow);
                 }
             }
@@ -153,13 +147,13 @@ internal partial class LifelineSettingsWindow : Window
             if (v.RunningHelperVersion is null)
             {
                 AboutHelperRunning.Text = v.HelperInstalled
-                    ? "Not running"
+                    ? "Stopped (Will auto-start on next blip)"
                     : "Not installed";
                 AboutHelperRunning.Foreground = warnBrush;
             }
             else
             {
-                AboutHelperRunning.Text = $"{v.RunningHelperVersion} (pid {v.RunningHelperPid})";
+                AboutHelperRunning.Text = $"Running (pid {v.RunningHelperPid})";
                 AboutHelperRunning.Foreground = v.RunningHelperOutdated ? errorBrush : okBrush;
             }
         }
@@ -218,10 +212,6 @@ internal partial class LifelineSettingsWindow : Window
         return fallback;
     }
 
-    /// <summary>
-    /// Test Ping. Moved to the Network tab and available in both host and
-    /// child processes — it depends on nothing this window can't provide.
-    /// </summary>
     private OptionRow CreatePingTestRow()
     {
         return new OptionRow
@@ -257,14 +247,6 @@ internal partial class LifelineSettingsWindow : Window
         };
     }
 
-    /// <summary>
-    /// Test Grid, Helper Status, Test Restart. Each is added only when its
-    /// callback exists — host gets the first two, child gets all three.
-    /// Before this change the whole Test & Diagnostics tab was gated on
-    /// _forceRestart (child-only), so the host settings window had no
-    /// diagnostic tests at all — exactly the wrong way around, because the
-    /// tray now guarantees the host wins the settings-window claim.
-    /// </summary>
     private void BuildNonPingTestRows()
     {
         var rows = _categorizedOptions["Test & Diagnostics"];
@@ -340,6 +322,21 @@ internal partial class LifelineSettingsWindow : Window
                 {
                     SetTestStatus("Writing request and exiting client...", "Wait", "#3b82f6");
                     DispatcherTimer.RunOnce(() => _forceRestart.Invoke(), TimeSpan.FromMilliseconds(500));
+                }, true)
+            });
+        }
+
+        if (_testFlashModal != null)
+        {
+            rows.Add(new OptionRow
+            {
+                DisplayName = "Test Flash Modal",
+                Description = "Simulates a Flash crash. Writes the restart request and immediately exits the client.",
+                IsTestRow = true,
+                Control = CreateActionButton("Test Modal", () =>
+                {
+                    SetTestStatus("Simulating Flash crash and exiting client...", "Wait", "#3b82f6");
+                    DispatcherTimer.RunOnce(() => _testFlashModal.Invoke(), TimeSpan.FromMilliseconds(500));
                 }, true)
             });
         }
@@ -626,7 +623,7 @@ internal partial class LifelineSettingsWindow : Window
         {
             foreach (var row in rows)
             {
-                if (row.IsTestRow) continue;   // test buttons have no saved state
+                if (row.IsTestRow) continue;
 
                 var option = _container.Options.FirstOrDefault(x => x.DisplayName == row.DisplayName);
                 if (option != null)
