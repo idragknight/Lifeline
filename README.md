@@ -4,8 +4,7 @@ A connection-blip detection and recovery plugin for **[VibeSkua 2.0+](https://gi
 
 Lifeline waits for your network to actually come back, checks if the client is still healthy, and only restarts when it isn't — bringing you back with the same account and the same script. A restarted client will also automatically signal the host to switch to Grid View after login.
 
-**Author:** Excite  
-**Version:** 1.0.0  
+**Author:** Excite
 **Requires:** VibeSkua 2.0.0 or newer (Avalonia client)
 
 ---
