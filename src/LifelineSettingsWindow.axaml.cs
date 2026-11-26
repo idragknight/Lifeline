@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
+using Avalonia.Input.Platform; // <-- ADDED THIS
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -649,11 +650,12 @@ internal partial class LifelineSettingsWindow : Window
         DispatcherTimer.RunOnce(() => StatusLabel.Text = "", TimeSpan.FromSeconds(2));
     }
 
-    private class OptionRow
-    {
-        public string DisplayName { get; set; } = "";
-        public string Description { get; set; } = "";
-        public Control Control { get; set; } = null!;
-        public bool IsTestRow { get; set; }
-    }
+
+}
+internal class OptionRow
+{
+    public string DisplayName { get; set; } = "";
+    public string Description { get; set; } = "";
+    public Control Control { get; set; } = null!;
+    public bool IsTestRow { get; set; }
 }

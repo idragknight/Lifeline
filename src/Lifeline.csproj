@@ -12,29 +12,13 @@
     <NoWarn>MSB3277;NU1605</NoWarn>
   </PropertyGroup>
 
-  <!--
-    Skua.Shared.Avalonia is NOT built by build.sh and is not in the auqw/skua
-    repo — it ships as a compiled DLL inside the installed VibeSkua client.
-
-    Resolution order:
-      1. $(SkuaSharedAvaloniaPath) — explicit override, if set
-      2. A parallel Skua.Shared.Avalonia.csproj checkout two levels up
-         (used by developers hacking on VibeSkua itself)
-      3. The DLL from the default VibeSkua install location
-         ($(LOCALAPPDATA)\VibeSkua\current\Assemblies\), which resolves per-user
-         without a hardcoded username in the HintPath
-
-    Custom-install users (e.g. D:\Games\VibeSkua\) override with:
-        dotnet build src/Lifeline.csproj -p:SkuaSharedAvaloniaPath=D:\Games\VibeSkua\current\Assemblies\Skua.Shared.Avalonia.dll
-  -->
-
   <PropertyGroup>
     <SkuaSharedAvaloniaPath Condition="'$(SkuaSharedAvaloniaPath)' == ''">$(LOCALAPPDATA)\VibeSkua\current\Assemblies\Skua.Shared.Avalonia.dll</SkuaSharedAvaloniaPath>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="11.3.12" />
-    <PackageReference Include="Avalonia.Desktop" Version="11.3.12" />
+    <PackageReference Include="Avalonia" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.6" />
   </ItemGroup>
 
   <ItemGroup Condition="Exists('..\..\Skua.Shared.Avalonia\Skua.Shared.Avalonia.csproj')">

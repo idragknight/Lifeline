@@ -10,7 +10,6 @@ namespace LifelineHelper;
 
 internal static class Program
 {
-    // FIXED: Removed accidental trailing spaces from the folder names!
     private static readonly string[] RequestDirs =
     {
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VibeSkua", "lifeline", "requests"),
@@ -22,10 +21,7 @@ internal static class Program
         "VibeSkua", "lifeline", "helper.log");
 
     private static readonly object LogLock = new();
-    
-    // YOUR FIX: Prevents race conditions where multiple threads try to claim the same file
     private static readonly ConcurrentDictionary<string, byte> ActiveFiles = new(StringComparer.OrdinalIgnoreCase);
-    
     private static readonly TimeSpan PidDeathTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan StaleProcessingAge = TimeSpan.FromMinutes(15);
 
@@ -283,7 +279,7 @@ internal static class Program
             catch { }
         }
 
-        // 2. MY FIX: Clean up stale .json files that are hopelessly stuck (prevents infinite loops)
+        // 2. Clean up stale .json files that are hopelessly stuck (prevents infinite loops)
         foreach (string file in Directory.EnumerateFiles(dir, "*.restart.json"))
         {
             try
@@ -321,7 +317,6 @@ internal static class Program
         string normalizedPath = Path.GetFullPath(path);
         if (!File.Exists(normalizedPath)) return;
         
-        // YOUR FIX: Prevents race conditions
         if (!ActiveFiles.TryAdd(normalizedPath, 0)) return;
 
         string processing = normalizedPath + ".processing";
@@ -331,7 +326,7 @@ internal static class Program
             bool claimed = false;
             string? lastIoError = null;
             
-            // MY FIX: Increased to 60 attempts @ 100ms (6 seconds) to give AV/OneDrive time to release the lock
+            // Increased to 60 attempts @ 100ms (6 seconds) to give AV/OneDrive time to release the lock
             for (int attempt = 0; attempt < 60; attempt++)
             {
                 try
@@ -436,7 +431,6 @@ internal static class Program
         }
         finally
         {
-            // YOUR FIX: Ensure the file is removed from the active dictionary
             ActiveFiles.TryRemove(normalizedPath, out _);
         }
     }

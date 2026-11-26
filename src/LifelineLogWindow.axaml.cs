@@ -7,6 +7,7 @@ using System.Text;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform; // <-- ADDED THIS
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
