@@ -31,6 +31,7 @@ internal sealed class RestartRequest
     [JsonPropertyName("pingTimeoutMs")]         public int PingTimeoutMs { get; set; }
 
     public string FileName => $"{Pid}.restart.json";
+    public string? StagingDir { get; set; }
 }
 
 /// <summary>

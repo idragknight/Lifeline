@@ -650,6 +650,61 @@ internal partial class LifelineSettingsWindow : Window
         DispatcherTimer.RunOnce(() => StatusLabel.Text = "", TimeSpan.FromSeconds(2));
     }
 
+        private async void CheckUpdates_Click(object? sender, RoutedEventArgs e)
+    {
+        UpdateStatusText.Text = "Checking for updates...";
+        UpdateStatusText.Foreground = this.FindResource("SkuaMutedTextBrush") as IBrush ?? Brushes.Gray;
+        UpdateButton.IsVisible = false;
+
+        var currentVersion = _versionInfo.PluginFullVersion;
+        var (updateAvailable, latestVersion, downloadUrl) = await LifelineUpdater.CheckForUpdateAsync(currentVersion);
+
+        if (updateAvailable && !string.IsNullOrEmpty(downloadUrl))
+        {
+            UpdateStatusText.Text = $"Update available: v{latestVersion} (Current: v{currentVersion})";
+            UpdateStatusText.Foreground = this.FindResource("SkuaWarnBrush") as IBrush ?? new SolidColorBrush(Color.Parse("#F59E0B"));
+            UpdateButton.IsVisible = true;
+            UpdateButton.Tag = downloadUrl; // Store the URL for the install click
+        }
+        else
+        {
+            UpdateStatusText.Text = $"You are up to date (v{currentVersion})";
+            UpdateStatusText.Foreground = this.FindResource("SkuaSuccessBrush") as IBrush ?? new SolidColorBrush(Color.Parse("#4ADE80"));
+            UpdateButton.IsVisible = false;
+        }
+    }
+
+        private async void InstallUpdate_Click(object? sender, RoutedEventArgs e)
+    {
+        if (UpdateButton.Tag is not string downloadUrl) return;
+
+        UpdateButton.IsEnabled = false;
+        UpdateStatusText.Text = "Downloading and preparing update...";
+        UpdateStatusText.Foreground = this.FindResource("SkuaMutedTextBrush") as IBrush ?? Brushes.Gray;
+
+        // FIX 1: Corrected the method name to match LifelineUpdater.cs
+        bool success = await LifelineUpdater.DownloadAndTriggerUpdateAsync(downloadUrl, msg => 
+        {
+            Dispatcher.UIThread.Post(() => UpdateStatusText.Text = msg);
+        });
+
+        if (success)
+        {
+            UpdateStatusText.Text = "Update ready! Closing client to let Helper install...";
+            UpdateStatusText.Foreground = this.FindResource("SkuaSuccessBrush") as IBrush ?? new SolidColorBrush(Color.Parse("#4ADE80"));
+            
+            // FIX 2: Removed the .bat file logic (which caused the 'Path' ambiguity error).
+            // We just exit the client. The Helper will see the "update" request, 
+            // wait for us to close, replace the files, and relaunch VibeSkua automatically!
+            DispatcherTimer.RunOnce(() => Environment.Exit(0), TimeSpan.FromMilliseconds(500));
+        }
+        else
+        {
+            UpdateStatusText.Text = "Update failed. Check logs for details.";
+            UpdateStatusText.Foreground = this.FindResource("SkuaErrorBrush") as IBrush ?? new SolidColorBrush(Color.Parse("#F87171"));
+            UpdateButton.IsEnabled = true;
+        }
+    }
 
 }
 internal class OptionRow

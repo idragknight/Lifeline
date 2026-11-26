@@ -27,4 +27,5 @@ internal sealed class RestartRequest
     [JsonPropertyName("pingWaitMaxSec")]        public int PingWaitMaxSec { get; set; }
     [JsonPropertyName("pingIntervalSec")]       public int PingIntervalSec { get; set; }
     [JsonPropertyName("pingTimeoutMs")]         public int PingTimeoutMs { get; set; }
+    public string? StagingDir { get; set; }
 }

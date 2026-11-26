@@ -363,6 +363,80 @@ internal static class Program
                 catch (Exception ex) { Log($"parse failed: {ex.Message}"); return; }
 
                 if (req is null) { Log("empty request"); return; }
+                // ==========================================
+                // NEW: HANDLE UPDATE REQUEST
+                // ==========================================
+                if (req.Action.Equals("update", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log($"Update requested by {req.Username}. Waiting for client to exit...");
+                    if (req.Pid > 0 && !WaitForExit(req.Pid))
+                    {
+                        Log("Update aborted: Could not close client.");
+                        return;
+                    }
+
+                    string stagingDir = req.StagingDir ?? "";
+                    if (string.IsNullOrWhiteSpace(stagingDir) || !Directory.Exists(stagingDir))
+                    {
+                        Log("Update failed: Staging directory not found.");
+                        return;
+                    }
+
+                    try
+                    {
+                        // 1. Update the Plugin DLL
+                        string pluginDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VibeSkua", "plugins");
+                        string newPluginDll = Path.Combine(stagingDir, "Lifeline.dll");
+                        if (File.Exists(newPluginDll))
+                        {
+                            File.Copy(newPluginDll, Path.Combine(pluginDir, "Lifeline.dll"), true);
+                            Log("Updated Lifeline.dll");
+                        }
+
+                        // 2. Update the Helper Files (Self-update trick)
+                        string helperDir = AppDomain.CurrentDomain.BaseDirectory;
+                        string[] helperFiles = { "LifelineHelper.exe", "LifelineHelper.dll", "LifelineHelper.deps.json", "LifelineHelper.runtimeconfig.json" };
+                        
+                        foreach (string file in helperFiles)
+                        {
+                            string source = Path.Combine(stagingDir, file);
+                            string dest = Path.Combine(helperDir, file);
+                            if (File.Exists(source))
+                            {
+                                if (file == "LifelineHelper.exe")
+                                {
+                                    // Windows locks running EXEs. Rename the current one to .old, then copy the new one.
+                                    string oldExe = dest + ".old";
+                                    if (File.Exists(oldExe)) File.Delete(oldExe);
+                                    File.Move(dest, oldExe); 
+                                }
+                                File.Copy(source, dest, true);
+                                Log($"Updated {file}");
+                            }
+                        }
+
+                        Log("Update complete! Relaunching client with original script...");
+                        
+                        // Clean up staging folder
+                        try { Directory.Delete(stagingDir, true); } catch { }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Update file replacement failed: {ex.Message}");
+                        return;
+                    }
+
+                    // Fall through to the normal relaunch logic below! 
+                    // BuildRelaunchArgs will automatically restore the --run-script argument.
+                }
+                // ==========================================
+                // END UPDATE BLOCK
+                // ==========================================
+                else if (string.Equals(req.Action, "give-up", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log($"GIVE-UP for {req.Username}: {req.Reason}. Not restarting.");
+                    return;
+                }
 
                 string scriptName = string.IsNullOrWhiteSpace(req.LoadedScript) ? "(none)" : Path.GetFileName(req.LoadedScript);
                 Log($"Restart Request: {req.Username} ({req.Reason}) | PID: {req.Pid} | Script: {scriptName} (Running: {req.ScriptWasRunning})");

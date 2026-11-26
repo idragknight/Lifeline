@@ -55,3 +55,8 @@ gridrequest/
 *.env.local
 secrets.json
 appsettings.local.json
+
+# --- Lifeline Packaging Artifacts ---
+package.ps1
+Lifeline.zip
+package_staging/
