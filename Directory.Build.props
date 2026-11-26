@@ -12,7 +12,7 @@
     DLL and the helper EXE pick up the same number.
   -->
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Lifeline' or '$(MSBuildProjectName)' == 'LifelineHelper'">
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
 
     <!--
       Stops the .NET SDK from automatically appending the git commit hash

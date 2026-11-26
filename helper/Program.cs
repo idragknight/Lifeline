@@ -24,6 +24,9 @@ internal static class Program
     private static readonly ConcurrentDictionary<string, byte> ActiveFiles = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan PidDeathTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan StaleProcessingAge = TimeSpan.FromMinutes(15);
+    
+    // NEW: Flag to prevent the helper from shutting down while an update is in progress
+    private static volatile bool IsUpdating = false;
 
     private static int Main(string[] args)
     {
@@ -101,11 +104,25 @@ internal static class Program
                         using var host = Process.GetProcessById(hostPid);
                         Log($"Monitoring host process (pid {hostPid})...");
                         host.WaitForExit();
-                        Log($"Host process (pid {hostPid}) exited. Shutting down helper.");
+                        
+                        // FIX: Only shut down the helper if we aren't in the middle of an update
+                        if (!IsUpdating)
+                        {
+                            Log($"Host process (pid {hostPid}) exited. Shutting down helper.");
+                            shutdown.Set();
+                        }
+                        else
+                        {
+                            Log($"Host process exited during update. Helper staying alive to finish update and relaunch.");
+                        }
                     }
                     catch (ArgumentException)
                     {
-                        Log($"Host process (pid {hostPid}) not found. Shutting down helper.");
+                        if (!IsUpdating)
+                        {
+                            Log($"Host process (pid {hostPid}) not found. Shutting down helper.");
+                            shutdown.Set();
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -113,7 +130,7 @@ internal static class Program
                     }
                     finally
                     {
-                        shutdown.Set();
+                        if (!IsUpdating) shutdown.Set();
                     }
                 });
             }
@@ -265,7 +282,6 @@ internal static class Program
 
     private static void ProcessPending(string dir)
     {
-        // 1. Clean up stale .processing files
         foreach (string file in Directory.EnumerateFiles(dir, "*.restart.processing"))
         {
             try
@@ -279,7 +295,6 @@ internal static class Program
             catch { }
         }
 
-        // 2. Clean up stale .json files that are hopelessly stuck (prevents infinite loops)
         foreach (string file in Directory.EnumerateFiles(dir, "*.restart.json"))
         {
             try
@@ -302,7 +317,6 @@ internal static class Program
             catch { }
         }
 
-        // 3. Process fresh .json files
         foreach (string file in Directory.EnumerateFiles(dir, "*.restart.json"))
         {
             if (File.Exists(file))
@@ -326,7 +340,6 @@ internal static class Program
             bool claimed = false;
             string? lastIoError = null;
             
-            // Increased to 60 attempts @ 100ms (6 seconds) to give AV/OneDrive time to release the lock
             for (int attempt = 0; attempt < 60; attempt++)
             {
                 try
@@ -363,17 +376,43 @@ internal static class Program
                 catch (Exception ex) { Log($"parse failed: {ex.Message}"); return; }
 
                 if (req is null) { Log("empty request"); return; }
+
+                string scriptName = string.IsNullOrWhiteSpace(req.LoadedScript) ? "(none)" : Path.GetFileName(req.LoadedScript);
+                Log($"Restart Request: {req.Username} ({req.Reason}) | PID: {req.Pid} | Script: {scriptName} (Running: {req.ScriptWasRunning})");
+
                 // ==========================================
-                // NEW: HANDLE UPDATE REQUEST
+                // HANDLE UPDATE REQUEST (Closes ALL clients)
                 // ==========================================
                 if (req.Action.Equals("update", StringComparison.OrdinalIgnoreCase))
                 {
-                    Log($"Update requested by {req.Username}. Waiting for client to exit...");
-                    if (req.Pid > 0 && !WaitForExit(req.Pid))
+                    IsUpdating = true;
+                    Log($"Update requested by {req.Username}. Closing ALL VibeSkua instances...");
+                    
+                    string exeName = Path.GetFileNameWithoutExtension(req.Exe);
+                    var allClients = Process.GetProcessesByName(exeName);
+                    
+                    // 1. Tell all instances to close
+                    foreach (var proc in allClients)
                     {
-                        Log("Update aborted: Could not close client.");
-                        return;
+                        try
+                        {
+                            if (!proc.CloseMainWindow()) proc.Kill();
+                        }
+                        catch { }
+                        finally { proc.Dispose(); }
                     }
+                    
+                    // 2. Wait for all of them to fully exit
+                    Log("Waiting for all clients to fully exit...");
+                    foreach (var proc in Process.GetProcessesByName(exeName))
+                    {
+                        try { proc.WaitForExit(15000); }
+                        catch { }
+                        finally { proc.Dispose(); }
+                    }
+                    
+                    // 3. Small delay to ensure Windows releases all file locks
+                    Thread.Sleep(1000);
 
                     string stagingDir = req.StagingDir ?? "";
                     if (string.IsNullOrWhiteSpace(stagingDir) || !Directory.Exists(stagingDir))
@@ -384,7 +423,7 @@ internal static class Program
 
                     try
                     {
-                        // 1. Update the Plugin DLL
+                        // Update Plugin DLL
                         string pluginDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VibeSkua", "plugins");
                         string newPluginDll = Path.Combine(stagingDir, "Lifeline.dll");
                         if (File.Exists(newPluginDll))
@@ -393,7 +432,7 @@ internal static class Program
                             Log("Updated Lifeline.dll");
                         }
 
-                        // 2. Update the Helper Files (Self-update trick)
+                        // Update Helper Files (Self-update trick)
                         string helperDir = AppDomain.CurrentDomain.BaseDirectory;
                         string[] helperFiles = { "LifelineHelper.exe", "LifelineHelper.dll", "LifelineHelper.deps.json", "LifelineHelper.runtimeconfig.json" };
                         
@@ -405,19 +444,16 @@ internal static class Program
                             {
                                 if (file == "LifelineHelper.exe")
                                 {
-                                    // Windows locks running EXEs. Rename the current one to .old, then copy the new one.
                                     string oldExe = dest + ".old";
                                     if (File.Exists(oldExe)) File.Delete(oldExe);
-                                    File.Move(dest, oldExe); 
+                                    try { File.Move(dest, oldExe); } catch { }
                                 }
                                 File.Copy(source, dest, true);
                                 Log($"Updated {file}");
                             }
                         }
 
-                        Log("Update complete! Relaunching client with original script...");
-                        
-                        // Clean up staging folder
+                        Log("Update complete! Relaunching client...");
                         try { Directory.Delete(stagingDir, true); } catch { }
                     }
                     catch (Exception ex)
@@ -425,23 +461,13 @@ internal static class Program
                         Log($"Update file replacement failed: {ex.Message}");
                         return;
                     }
-
-                    // Fall through to the normal relaunch logic below! 
-                    // BuildRelaunchArgs will automatically restore the --run-script argument.
+                    
+                    // Fall through to the normal relaunch logic below!
                 }
                 // ==========================================
                 // END UPDATE BLOCK
                 // ==========================================
                 else if (string.Equals(req.Action, "give-up", StringComparison.OrdinalIgnoreCase))
-                {
-                    Log($"GIVE-UP for {req.Username}: {req.Reason}. Not restarting.");
-                    return;
-                }
-
-                string scriptName = string.IsNullOrWhiteSpace(req.LoadedScript) ? "(none)" : Path.GetFileName(req.LoadedScript);
-                Log($"Restart Request: {req.Username} ({req.Reason}) | PID: {req.Pid} | Script: {scriptName} (Running: {req.ScriptWasRunning})");
-
-                if (string.Equals(req.Action, "give-up", StringComparison.OrdinalIgnoreCase))
                 {
                     Log($"GIVE-UP for {req.Username}: {req.Reason}. Not restarting.");
                     return;
